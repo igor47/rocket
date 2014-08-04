@@ -6,45 +6,31 @@
 #include <SoftwareSerial.h>
 
 #include "config.h"
-#include "Sensors/Sensors.h"
 
 /*********** Pin Assignments ***********************/
 //joystick pins
 const byte VerticalStickPin = 0;
 const byte HorizontalStickPin = 1;
 
-// temperature sensor (analog pin)
-const byte TemperaturePin = 2;
-
-// for sensing the approximate voltage on the battery (analog pin)
-const byte BatteryVoltagePin = 3;
-
-// magnetometer/accelerometer LSM303 (analog pins)
-const byte LSM303SDAPin = 4;
-const byte LSM303SCLPin = 5;
-
 // these aren't used in the code, they're just here
 // as a reminder that those pins are not available
 const byte ServerRXPin = 0;
 const byte ServerTXPin = 1;
 
-// motor speed (these pins can be interrupts)
-const byte RightEncoderPin = 2;
-const byte LeftEncoderPin = 3;
-
-// sonar
-// NOTE: Timer0 is used for millis() timing, and shares pin 5 and 6,
-// so don't mess with the frequency or nothing will happen on time.
-const byte LeftSonarPWPin = 4;
-const byte RightSonarPWPin = 5;
+// buttons on the shield
+const byte ButtonEPin = 3;
+const byte ButtonDPin = 4;
+const byte ButtonCPin = 5;
+const byte ButtonBPin = 6;
+const byte ButtonAPin = 7;
+const byte ButtonFPin = 8;
+const byte ButtonGPin = 9;
 
 // talking to the Sabertooth driver
-const byte DriverTXPin = 9;
-const byte DriverRXPin = 10;
+const byte DriverTXPin = 10;
+const byte DriverRXPin = 11;
 
-// used to show that the arduino main loop is running
-const byte StoppedLEDPin = 11;
-const byte WarnLEDPin = 12;
+// just show that things are going
 const byte RunLEDPin = 13;
 
 /*************** Globals *********************/
@@ -52,34 +38,15 @@ const byte RunLEDPin = 13;
 // Sabertooth serial interface is unidirectional, so only TX is really needed
 SoftwareSerial sabertoothSerial(DriverRXPin, DriverTXPin);
 
-AnalogSensor horizontal("HS", HorizontalStickPin);
-AnalogSensor vertical("VS", VerticalStickPin);
-AnalogSensor voltage("BV", BatteryVoltagePin);
-AnalogSensor temperature("DT", TemperaturePin);
-
-Sonar leftSonar("LS", LeftSonarPWPin);
-Sonar rightSonar("RS", RightSonarPWPin);
-
-Sensor* sensors[] = {
-  &horizontal,
-  &vertical,
-
-  &voltage,
-  &temperature,
-
-  &leftSonar,
-  &rightSonar,
-};
-
-const unsigned int NumSensors = sizeof(sensors) / sizeof(sensors[0]);
-
 /*************** Data Types  *********************/
 
 static struct State {
-  State() : emergencyStop(false),
-    runLED(false) { }
-  bool emergencyStop;
+  State() : runLED(false),
+    vertical(0),
+    horizontal(0) { }
   bool runLED;
+  unsigned int vertical;
+  unsigned int horizontal;
 } state;
 
 static struct Drive {
@@ -111,7 +78,7 @@ void send_velocity_to_computer(int speed, int side, int left, int right);
 void send_velocity_to_sabertooth(int left, int right);
 void left_encoder_interrupt();
 void right_encoder_interrupt();
-void read_sensors();
+void read_sticks();
 void toggle_led();
 
 // begin code
@@ -120,45 +87,32 @@ void setup()
   // initialize the serial communication with the server
   Serial.begin(9600);
 
-  // start the wire protocol
-  Wire.begin();
-
   // initialize communication with the sabertooth motor controller
   sabertoothSerial.begin(19200);
   sabertoothSerial.write(uint8_t(0));
 
-  // initialize the interrupts on encoders
-  pinMode(LeftEncoderPin, INPUT);           // set pin to input
-  digitalWrite(LeftEncoderPin, HIGH);       // turn on pullup resistors
-  attachInterrupt(LeftEncoderPin - 2, left_encoder_interrupt, FALLING);
-
-  pinMode(RightEncoderPin, INPUT);           // set pin to input
-  digitalWrite(RightEncoderPin, HIGH);       // turn on pullup resistors
-  attachInterrupt(RightEncoderPin - 2, right_encoder_interrupt, FALLING);
-
   // initialize the led pin
-  pinMode(StoppedLEDPin, OUTPUT);
-  pinMode(WarnLEDPin, OUTPUT);
   pinMode(RunLEDPin, OUTPUT);
 
   // turn on the warn led to indicate calibration
-  digitalWrite(WarnLEDPin, HIGH);
-
   int h_reads = 0,
       v_reads = 0,
       reads = 16;
 
   for (int i =0; i < reads; i++) {
-    read_sensors();
-    h_reads += horizontal.value();
-    v_reads += vertical.value();
+    read_sticks();
+    h_reads += state.horizontal;
+    v_reads += state.vertical;
+    toggle_led();
   }
 
   drive.h_center = h_reads / reads;
   drive.v_center = v_reads / reads;
+}
 
-  // calibration complete
-  digitalWrite(WarnLEDPin, LOW);
+void read_sticks() {
+  state.vertical = analogRead(VerticalStickPin);
+  state.horizontal = analogRead(HorizontalStickPin);
 }
 
 inline int clamp(int value, int min, int max)
@@ -173,12 +127,12 @@ inline int clamp(int value, int min, int max)
 
 void loop()
 {
-  read_sensors();
+  read_sticks();
 
   short direction = drive.forward;
 
   int speed = clamp(
-          vertical.value(),
+          state.vertical,
           drive.v_center - drive.v_gap - drive.v_range,
           drive.v_center + drive.v_gap + drive.v_range);
 
@@ -195,7 +149,7 @@ void loop()
   // side is between -100 and 100
   // -100 is all the way on the right
   int side = clamp(
-          horizontal.value(),
+          state.horizontal,
           drive.h_center - drive.h_gap - drive.h_range,
           drive.h_center + drive.h_gap + drive.h_range);
 
@@ -237,17 +191,6 @@ void right_encoder_interrupt() {
   RIGHT_PULSES++;
 }
 
-void read_sensors()
-{
-  //read out the sensors
-  for(unsigned int i = 0; i < NumSensors; i++) {
-    if (!sensors[i])
-      continue;
-
-    sensors[i]->read();
-  }
-}
-
 // code for talking to the sabertooth
 void send_velocity_to_sabertooth(int left, int right)
 {
@@ -255,10 +198,8 @@ void send_velocity_to_sabertooth(int left, int right)
   right = clamp(right, -63, 63);
 
   if (left == 0 && right == 0) {
-    digitalWrite(StoppedLEDPin, HIGH);
     sabertoothSerial.write(uint8_t(0));
   } else {
-    digitalWrite(StoppedLEDPin, LOW);
     sabertoothSerial.write(uint8_t(64 + left));
     sabertoothSerial.write(uint8_t(192 + right));
   }
@@ -266,9 +207,9 @@ void send_velocity_to_sabertooth(int left, int right)
 
 void send_velocity_to_computer(int speed, int side, int left, int right) {
   Serial.print("V/H raw:");
-  Serial.print(vertical.value());
+  Serial.print(state.vertical);
   Serial.print("/");
-  Serial.print(horizontal.value());
+  Serial.print(state.horizontal);
   Serial.print(";");
 
   Serial.print("-- h/v center:");
