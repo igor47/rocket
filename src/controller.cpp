@@ -9,8 +9,8 @@
 
 /*********** Pin Assignments ***********************/
 //joystick pins
-const byte VerticalStickPin = 0;
-const byte HorizontalStickPin = 1;
+const byte VerticalStickPin = 1;
+const byte HorizontalStickPin = 0;
 
 // these aren't used in the code, they're just here
 // as a reminder that those pins are not available
