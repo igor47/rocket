@@ -41,12 +41,26 @@ SoftwareSerial sabertoothSerial(DriverRXPin, DriverTXPin);
 /*************** Data Types  *********************/
 
 static struct State {
-  State() : runLED(false),
+  State() :
+    loop(0),
+
+    // set by read_sticks
     vertical(0),
-    horizontal(0) { }
-  bool runLED;
+    horizontal(0),
+
+    // set by set_desired_speeds
+    desired_left(0),
+    desired_right(0),
+    desired_speed(0),
+    desired_side(0)
+  { }
+  unsigned int loop;
   unsigned int vertical;
   unsigned int horizontal;
+  int desired_left;
+  int desired_right;
+  int desired_speed;
+  int desired_side;
 } state;
 
 static struct Drive {
@@ -72,12 +86,13 @@ static struct Drive {
 
 /*************** Prototypes  *********************/
 
-void send_velocity_to_computer(int speed, int side, int left, int right);
-void send_velocity_to_sabertooth(int left, int right);
+void send_velocity_to_computer();
+void send_velocity_to_sabertooth();
 void left_encoder_interrupt();
 void right_encoder_interrupt();
 void read_sticks();
 void toggle_led();
+void set_desired_speeds();
 
 // begin code
 void setup()
@@ -123,10 +138,7 @@ inline int clamp(int value, int min, int max)
   return value;
 }
 
-void loop()
-{
-  read_sticks();
-
+void set_desired_speeds() {
   short direction = drive.forward;
 
   int speed = clamp(
@@ -160,9 +172,11 @@ void loop()
   }
 
    // biggest diff between left and right is at most 200
-  long right = direction * (speed - side);
-  long left = direction * (speed + side);
+  int right = direction * (speed - side);
+  int left = direction * (speed + side);
 
+  // no motor goes faster than speed
+  // now diff between left and right is at most 2 * speed
   right = clamp(right, -speed, speed);
   left = clamp(left, -speed, speed);
 
@@ -170,11 +184,27 @@ void loop()
   left = drive.max_speed * left / 200;
   right = drive.max_speed * right / 200;
 
-  send_velocity_to_computer(speed, side, left, right);
-  send_velocity_to_sabertooth(left, right);
+  // save the state
+  state.desired_left = left;
+  state.desired_right = right;
+  state.desired_speed = speed;
+  state.desired_side = side;
+}
 
-  // toggle the run led every time
+void loop()
+{
+  // increment loop counter and blink the run led
   toggle_led();
+
+  // deal with actual driving
+  read_sticks();
+  set_desired_speeds();
+  send_velocity_to_sabertooth();
+
+  // talking to the computer takes a while
+  if (state.loop % 16 == 0) {
+    send_velocity_to_computer();
+  }
 }
 
 // interrupt functions for logging encoder events
@@ -189,10 +219,10 @@ void right_encoder_interrupt() {
 }
 
 // code for talking to the sabertooth
-void send_velocity_to_sabertooth(int left, int right)
+void send_velocity_to_sabertooth()
 {
-  left = clamp(left, -63, 63);
-  right = clamp(right, -63, 63);
+  int left = clamp(state.desired_left, -63, 63);
+  int right = clamp(state.desired_right, -63, 63);
 
   if (left == 0 && right == 0) {
     sabertoothSerial.write(uint8_t(0));
@@ -202,7 +232,7 @@ void send_velocity_to_sabertooth(int left, int right)
   }
 }
 
-void send_velocity_to_computer(int speed, int side, int left, int right) {
+void send_velocity_to_computer() {
   Serial.print("V/H raw:");
   Serial.print(state.vertical);
   Serial.print("/");
@@ -217,26 +247,26 @@ void send_velocity_to_computer(int speed, int side, int left, int right) {
 
 
   Serial.print("-- speed/side:");
-  Serial.print(speed);
+  Serial.print(state.desired_speed);
   Serial.print("/");
-  Serial.print(side);
+  Serial.print(state.desired_side);
   Serial.print(";");
 
 
   Serial.print(" -- left/right:");
-  Serial.print(left);
+  Serial.print(state.desired_left);
   Serial.print("/");
-  Serial.print(right);
+  Serial.print(state.desired_right);
   Serial.print("\r\n");
 }
 
 void toggle_led()
 {
-  if(state.runLED) {
+  state.loop++;
+
+  if(state.loop % 2 == 0) {
     digitalWrite(RunLEDPin, LOW);
-    state.runLED = false;
   } else {
     digitalWrite(RunLEDPin, HIGH);
-    state.runLED = true;
   }
 }
