@@ -43,10 +43,10 @@ const byte RunLEDPin = 13;
 SoftwareSerial sabertoothSerial(DriverRXPin, DriverTXPin);
 
 // talking to led strip
-PololuLedStrip<12> ledStrip;
+PololuLedStrip<LedStripPin> ledStrip;
 
 // Create a buffer for holding the colors (3 bytes per color).
-#define LED_COUNT 60
+#define LED_COUNT 30
 rgb_color colors[LED_COUNT];
 
 /*************** Data Types  *********************/
@@ -288,12 +288,21 @@ void toggle_led()
 
 void drive_led_strip()
 {
+  int red = 235;
+  int green = 150;
+  int redplus = 0;
+
+  // todo: vary mingreen depending on speed
+  int mingreen = 20;
+
   // Update the colors.
-  byte time = millis() >> 2;
-  for(uint16_t i = 0; i < LED_COUNT; i++)
+  for(int i = 0; i < LED_COUNT; i++)
   {
-    byte x = time - 8*i;
-    colors[i] = (rgb_color){ x, 255 - x, x };
+    green = colors[i].green + random(mingreen) - mingreen / 2;
+    green = clamp(green, mingreen, 250);
+
+    redplus = 20 * (clamp(green - 100, 0, 150) / 150);
+    colors[i] = (rgb_color){ red + redplus, green, 0 };
   }
 
   // Write the colors to the LED strip.
