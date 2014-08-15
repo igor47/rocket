@@ -4,6 +4,7 @@
 #include <Arduino.h>
 #include <Wire.h>
 #include <SoftwareSerial.h>
+#include "PololuLedStrip.h"
 
 #include "config.h"
 
@@ -16,6 +17,9 @@ const byte HorizontalStickPin = 0;
 // as a reminder that those pins are not available
 const byte ServerRXPin = 0;
 const byte ServerTXPin = 1;
+
+// led strip is on pin 2
+const byte LedStripPin = 2;
 
 // buttons on the shield
 const byte ButtonEPin = 3;
@@ -37,6 +41,13 @@ const byte RunLEDPin = 13;
 
 // Sabertooth serial interface is unidirectional, so only TX is really needed
 SoftwareSerial sabertoothSerial(DriverRXPin, DriverTXPin);
+
+// talking to led strip
+PololuLedStrip<12> ledStrip;
+
+// Create a buffer for holding the colors (3 bytes per color).
+#define LED_COUNT 60
+rgb_color colors[LED_COUNT];
 
 /*************** Data Types  *********************/
 
@@ -93,6 +104,7 @@ void right_encoder_interrupt();
 void read_sticks();
 void toggle_led();
 void set_desired_speeds();
+void drive_led_strip();
 
 // begin code
 void setup()
@@ -201,6 +213,9 @@ void loop()
   set_desired_speeds();
   send_velocity_to_sabertooth();
 
+  // such beautiful, very colors
+  drive_led_strip();
+
   // talking to the computer takes a while
   if (state.loop % 16 == 0) {
     send_velocity_to_computer();
@@ -269,4 +284,18 @@ void toggle_led()
   } else {
     digitalWrite(RunLEDPin, HIGH);
   }
+}
+
+void drive_led_strip()
+{
+  // Update the colors.
+  byte time = millis() >> 2;
+  for(uint16_t i = 0; i < LED_COUNT; i++)
+  {
+    byte x = time - 8*i;
+    colors[i] = (rgb_color){ x, 255 - x, x };
+  }
+
+  // Write the colors to the LED strip.
+  ledStrip.write(colors, LED_COUNT);
 }
